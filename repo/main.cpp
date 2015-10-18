@@ -10,6 +10,8 @@
 #include <boost/core/ref.hpp>
 #include <boost/timer/timer.hpp>
 #include <boost/chrono.hpp>
+#include <boost/asio.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include "Windows.h"
 using namespace std;
 
@@ -37,7 +39,7 @@ public:
 };
 
 int roll_die(boost::random::mt19937 &gen) {
-	boost::random::uniform_int_distribution<> dist(1, 999999);
+	boost::random::uniform_int_distribution<> dist(1, 999);
 	return dist(gen);
 }
 
@@ -82,18 +84,74 @@ void thread_func(THR &str_thr, LARGE_INTEGER &Frequency) {
 	file.close();
 }
 
-class A {
+class A  {
 public:
-	A() {};
-	~A() {};
+	static int i;
+	A() {
+		++i;
+	};
+	~A() {
+		--i;
+	};
 	void f(int a) { cout << "AAAAAA" << a << endl; }
 };
+
+int A::i = 0;
 
 class B : public A {
 public:
 	B() {};
 	~B() {};
 	void f(int b) { cout << "BBBBBB" << b << endl; }
+};
+
+class printer
+{
+public:
+	printer(boost::asio::io_service& io)
+		: strand_(io),
+		timer1_(io, boost::posix_time::seconds(1)),
+		timer2_(io, boost::posix_time::seconds(1)),
+		count_(0)
+	{
+		timer1_.async_wait(strand_.wrap(boost::bind(&printer::print1, this)));
+		timer2_.async_wait(strand_.wrap(boost::bind(&printer::print2, this)));
+	}
+
+	~printer()
+	{
+		std::cout << "Final count is " << count_ << std::endl;
+	}
+
+	void print1()
+	{
+		if (count_ < 10)
+		{
+			std::cout << "Timer 1: " << count_ << std::endl;
+			++count_;
+
+			timer1_.expires_at(timer1_.expires_at() + boost::posix_time::seconds(1));
+			timer1_.async_wait(strand_.wrap(boost::bind(&printer::print1, this)));
+		}
+	}
+
+	void print2()
+	{
+		if (count_ < 10)
+		{
+			std::cout << "Timer 2: " << count_ << std::endl;
+			++count_;
+
+			timer2_.expires_at(timer2_.expires_at() + boost::posix_time::seconds(1));
+			timer2_.async_wait(strand_.wrap(boost::bind(&printer::print2, this)));
+		}
+	}
+
+private:
+	boost::asio::io_service::strand strand_;
+	boost::asio::deadline_timer timer1_;
+	boost::asio::deadline_timer timer2_;
+	int count_;
 };
 
 int main() {
@@ -106,22 +164,35 @@ int main() {
 
 	int a = 1, b = 2;
 	A *A1 = new A();
+	A *A2;
+	A A3;
+	A1->~A();
+	A3.~A();
 	A *B1 = new B();
 	A1->f(a);
 	B1->f(b);
 
+	boost::asio::io_service io;
+	printer p(io);
+	//boost::thread t(boost::bind(&boost::asio::io_service::run, &io));
+	//io.run();
+	//t.join();
+
+	//return 0;
+
 	QueryPerformanceFrequency(&Frequency);
 	QueryPerformanceCounter(&StartingTime);
-	boost::thread ** thrd_arr = new boost::thread *[4];
+	boost::thread ** thrd_arr = new boost::thread * [4];
 	boost::thread_group * rand_threads = new boost::thread_group;
 	THR * str_thr_arr = new THR[4];
 	for (int i = 0; i < 4; ++i) {
 		str_thr_arr[i].id = i + 1;
-		thrd_arr[i] = new boost::thread(boost::bind(&thread_func, boost::ref(str_thr_arr[i]), boost::ref(Frequency)));
+		thrd_arr[i]=new boost::thread(boost::bind(&thread_func, boost::ref(str_thr_arr[i]), boost::ref(Frequency)));
 		rand_threads->add_thread(thrd_arr[i]);
 	}
 	rand_threads->join_all();
 	rand_threads->~thread_group();
+	delete[] thrd_arr;
 	QueryPerformanceCounter(&EndingTime);
 	ElapsedNanoseconds.QuadPart = (EndingTime.QuadPart - StartingTime.QuadPart) * 1000000000 / Frequency.QuadPart;
 	EvenOddFunctor() = for_each(my_list,
